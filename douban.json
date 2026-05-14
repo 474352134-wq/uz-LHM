@@ -1,5 +1,5 @@
 {
-  "name": "TMDB视频源",
+  "name": "豆瓣电影热映",
   "codeID": "", 
   "api": "https://raw.githubusercontent.com/474352134-wq/uz-douban/main/douban.js", 
   "webSite": "https://movie.douban.com", 
@@ -9,6 +9,6 @@
   "isLock": false,
   "blockClassList": [],
   "env": "",
-  "version": 19,
+  "version": 20,
   "type": 101
 }
