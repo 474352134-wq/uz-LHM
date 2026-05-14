@@ -2,7 +2,7 @@
   "name": "{LHM}豆瓣",
   "version": 8,
   "remark": "红梅出品",
-  "api": "https://raw.githubusercontent.com/474352134-wq/uzVideo-extensions/main/vod/js/douban_2026.js",
+  "api": "https://raw.githubusercontent.com/474352134-wq/uz-douban/main/douban.js",
   "type": 101,
   "webSite": "https://movie.douban.com",
   "codeID": "",
