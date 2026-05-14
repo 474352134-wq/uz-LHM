@@ -1,213 +1,206 @@
-// ==UserScript==
-// @name         UZ-豆瓣电影源 (修正版)
-// @namespace    https://uzapp.io/
-// @version      19
-// @description  适配UZ播放器，修复Cookie验证，支持实时热映数据
-// @author       UZ-Dev
-// @match        *://*/*
-// @grant        none
-// ==/UserScript==
+// ignore
 
-/**
- * ==========================================
- * 配置区域
- * ==========================================
- */
+//@name:豆瓣电影热映
+//@webSite:https://movie.douban.com
+//@version:20
+//@remark:使用Cookie获取实时数据
+//@codeID:
+//@env:
+//@isAV:0
+//@deprecated:0
 
-// ⚠️ 注意：这里必须填入你抓包获取的最新 Cookie，否则接口会返回 403 或空数据
-const MY_COOKIE = 'll="118297"; bid=boJYIZel7VY; _vwo_uuid_v2=D9DB9358E8164A07A59578831654B7800|4b559143faa8f5a04a9dab4dc74cda1e; __utma=30149280.827381539.1772196852.1778510963.1778755207.5; __utmc=30149280; __utmz=30149280.1778755207.5.3.utmcsr=cn.bing.com|utmccn=(referral)|utmcmd=referral|utmcct=/; ap_v=0,6.0; __utmb=30149280.1.10.1778755207; dbcl2="295088353:j8wOIKpy4Kw"; ck=jx66; frodotk_db="5a9d6afdccb445e70fd840f9661cd1b5"; push_noty_num=0; push_doumail_num=0';
+// ignore
 
-// 豆瓣接口地址
-const DOUBAN_API = 'https://movie.douban.com/j/search_subjects';
+import {
+    FilterLabel,
+    FilterTitle,
+    VideoClass,
+    VideoSubclass,
+    VideoDetail,
+    RepVideoClassList,
+    RepVideoSubclassList,
+    RepVideoList,
+    RepVideoDetail,
+    RepVideoPlayUrl,
+    UZArgs,
+    UZSubclassVideoListArgs,
+} from '../core/uzVideo.js'
 
-/**
- * ==========================================
- * UZ 脚本核心逻辑
- * ==========================================
- */
+import {
+    UZUtils,
+    ProData,
+    ReqResponseType,
+    ReqAddressType,
+    req,
+    getEnv,
+    setEnv,
+    goToVerify,
+    openWebToBindEnv,
+    toast,
+    kIsDesktop,
+    kIsAndroid,
+    kIsIOS,
+    kIsWindows,
+    kIsMacOS,
+    kIsTV,
+    kLocale,
+    kAppVersion,
+    formatBackData,
+} from '../core/uzUtils.js'
 
-// 忽略导入提示
-// import { ... } from '../core/uzVideo.js' ... (UZ环境已内置，无需显式导入)
+import { cheerio, Crypto, Encrypt, JSONbig } from '../core/uz3lib.js'
+
+// ignore
 
 const appConfig = {
     _webSite: 'https://movie.douban.com',
-    get webSite() { return this._webSite; },
-    set webSite(value) { this._webSite = value; },
-    _uzTag: 'douban_movie',
-    get uzTag() { return this._uzTag; },
-    set uzTag(value) { this._uzTag = value; },
-};
+    get webSite() {
+        return this._webSite
+    },
+    set webSite(value) {
+        this._webSite = value
+    },
+    _uzTag: '',
+    get uzTag() {
+        return this._uzTag
+    },
+    set uzTag(value) {
+        this._uzTag = value
+    },
+}
+
+// ==========================================
+// ⚠️ 请在这里填入你的 Cookie
+// ==========================================
+const MY_COOKIE = 'll="118297"; bid=boJYIZel7VY; _vwo_uuid_v2=D9DB9358E8164A07A59578831654B7800|4b559143faa8f5a04a9dab4dc74cda1e; __utma=30149280.827381539.1772196852.1778510963.1778755207.5; __utmc=30149280; __utmz=30149280.1778755207.5.3.utmcsr=cn.bing.com|utmccn=(referral)|utmcmd=referral|utmcct=/; ap_v=0,6.0; __utmb=30149280.1.10.1778755207; dbcl2="295088353:j8wOIKpy4Kw"; ck=jx66; frodotk_db="5a9d6afdccb445e70fd840f9661cd1b5"; push_noty_num=0; push_doumail_num=0';
 
 /**
- * 1. 获取分类列表 (getClassList)
- * 这里我们定义两个分类：热映、高分
+ * 获取分类列表 (对应流程图第一步)
  */
 async function getClassList(args) {
-    let backData = new RepVideoClassList();
+    var backData = new RepVideoClassList()
     try {
         // 定义分类
-        let class1 = new VideoClass();
-        class1.type_name = "正在热映";
-        class1.type_id = "hot"; // 对应接口 tag=热门
-
-        let class2 = new VideoClass();
-        class2.type_name = "高分经典";
-        class2.type_id = "classic"; // 对应接口 tag=经典
-
-        backData.class_list = [class1, class2];
-    } catch (e) {
-        backData.error = e.toString();
+        let classes = [
+            { type_id: 'hot', type_name: '🔥 正在热映' },
+            { type_id: 'recommend', type_name: '🌟 高分推荐' },
+            { type_id: 'coming_soon', type_name: '📅 即将上映' }
+        ]
+        backData.class = classes
+    } catch (error) {
+        backData.error = error.toString()
     }
-    return JSON.stringify(backData);
+    return JSON.stringify(backData)
 }
 
 /**
- * 2. 获取视频列表 (getVideoList)
- * 核心逻辑：调用豆瓣 API 并解析
+ * 获取视频列表 (对应流程图：点击分类 -> 获取列表)
  */
 async function getVideoList(args) {
-    let backData = new RepVideoList();
+    var backData = new RepVideoList()
     try {
-        // 解析分页参数
-        let page = args.page || 1;
-        let limit = 20;
-        let start = (page - 1) * limit;
+        let typeId = args.classTypeId // 获取分类ID (hot, recommend, etc.)
+        let page = args.page || 1
+        let start = (page - 1) * 20 // 豆瓣每页20条
 
-        // 确定接口参数
-        let tag = "热门"; // 默认热映
-        if (args.class && args.class.type_id === "classic") {
-            tag = "经典";
-        }
+        let tag = ''
+        if (typeId === 'hot') tag = '热映'
+        else if (typeId === 'recommend') tag = '经典'
+        else if (typeId === 'coming_soon') tag = '即将上映'
 
-        // 构造请求 URL
-        let url = `${DOUBAN_API}?type=movie&tag=${encodeURIComponent(tag)}&sort=recommend&page_limit=${limit}&page_start=${start}`;
-
-        // 发起请求 (关键：带上 Cookie)
-        let res = await req(url, {
-            method: 'GET',
-            headers: {
-                'Cookie': MY_COOKIE,
-                'Referer': 'https://movie.douban.com/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-
-        // 解析 JSON
-        let json = JSON.parse(res.content);
-
-        if (json.subjects && json.subjects.length > 0) {
-            json.subjects.forEach(item => {
-                let video = new VideoDetail(); // UZ中 VideoList 也是用 VideoDetail 结构或者简易结构
-                video.vod_name = item.title;
-                video.vod_pic = item.cover; // 封面图
-                video.vod_remarks = item.rate; // 评分
-                // 详情页链接，用于后续获取详情
-                video.vod_url = item.url;
-                // 传递必要的参数给下一级
-                video.vod_id = item.url;
-
-                backData.video_list.push(video);
-            });
-        } else {
-            backData.error = "暂无数据或Cookie失效";
-        }
-
-    } catch (e) {
-        backData.error = "请求失败: " + e.toString();
-    }
-    return JSON.stringify(backData);
-}
-
-/**
- * 3. 获取视频详情 (getVideoDetail)
- * 豆瓣本身不提供播放源，这里我们模拟一个“暂无播放源”或者跳转到外部
- */
-async function getVideoDetail(args) {
-    let backData = new RepVideoDetail();
-    try {
-        // 我们直接使用列表页传来的数据填充详情
-        // 实际场景中，这里可以再次请求详情页抓取简介
-        backData.vod_name = "豆瓣电影详情";
-        backData.vod_content = "数据来源：豆瓣电影\n注意：豆瓣仅提供数据索引，不提供直接播放资源。";
-        backData.vod_pic = args.vod_pic;
-
-        // 构造一个假的播放集数，点击后通过 getVideoPlayUrl 跳转
-        let episode = new VideoDetail();
-        episode.vod_name = "去网页查看";
-        episode.vod_url = args.vod_url; // 传递原始豆瓣链接
-
-        backData.vod_play_url = "查看页面$" + args.vod_url;
-        backData.vod_play_from = "豆瓣链接";
-
-    } catch (e) {
-        backData.error = e.toString();
-    }
-    return JSON.stringify(backData);
-}
-
-/**
- * 4. 获取播放地址 (getVideoPlayUrl)
- * 直接返回豆瓣的电影详情页链接，UZ播放器通常支持直接打开网页
- */
-async function getVideoPlayUrl(args) {
-    let backData = new RepVideoPlayUrl();
-    try {
-        // 返回原始链接，UZ 会尝试用内置浏览器打开
-        backData.url = args.vod_url;
-    } catch (e) {
-        backData.error = e.toString();
-    }
-    return JSON.stringify(backData);
-}
-
-/**
- * 5. 搜索 (searchVideo)
- * 豆瓣搜索接口
- */
-async function searchVideo(args) {
-    let backData = new RepVideoList();
-    try {
-        let keyword = args.searchWord;
-        let start = 0; // 搜索默认第一页
-
-        // 豆瓣搜索接口
-        let url = `https://movie.douban.com/j/search_subjects?type=movie&tag=%E7%83%AD%E9%97%A8&sort=recommend&page_limit=20&page_start=${start}&q=${encodeURIComponent(keyword)}`;
+        // 请求豆瓣接口
+        let url = `https://movie.douban.com/j/search_subjects?type=movie&tag=${tag}&sort=recommend&page_limit=20&page_start=${start}`
 
         let res = await req(url, {
-            method: 'GET',
             headers: {
                 'Cookie': MY_COOKIE,
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
                 'Referer': 'https://movie.douban.com/'
             }
-        });
+        })
 
-        let json = JSON.parse(res.content);
-        if (json.subjects) {
-            json.subjects.forEach(item => {
-                let video = new VideoDetail();
-                video.vod_name = item.title;
-                video.vod_pic = item.cover;
-                video.vod_remarks = item.rate;
-                video.vod_url = item.url;
-                backData.video_list.push(video);
-            });
+        if (res.code === 200) {
+            let json = JSON.parse(res.body)
+            if (json.subjects && json.subjects.length > 0) {
+                json.subjects.forEach(item => {
+                    let video = new VideoDetail() // 复用VideoDetail结构，或者用VideoItem如果UZ有定义
+                    video.vod_id = item.url // 传递详情页链接作为ID
+                    video.vod_name = item.title
+                    video.vod_pic = item.cover // 封面图
+                    video.vod_remarks = item.rate // 评分作为备注
+                    // UZ列表通常需要 vod_id, vod_name, vod_pic, vod_remarks
+                    backData.list.push({
+                        vod_id: item.url,
+                        vod_name: item.title,
+                        vod_pic: item.cover,
+                        vod_remarks: "评分: " + item.rate
+                    })
+                })
+            }
         }
-
-    } catch (e) {
-        backData.error = e.toString();
+    } catch (error) {
+        backData.error = error.toString()
     }
-    return JSON.stringify(backData);
+    return JSON.stringify(backData)
 }
 
-// ==========================================
-// 必须导出的对象 (UZ 加载入口)
-// ==========================================
-export {
-    getClassList,
-    getSubclassList, // 如果需要二级分类可以实现，这里留空
-    getVideoList,
-    getSubclassVideoList, // 如果需要二级列表可以实现
-    getVideoDetail,
-    getVideoPlayUrl,
-    searchVideo
-};
+/**
+ * 获取视频详情 (对应流程图：点击视频 -> 获取详情)
+ */
+async function getVideoDetail(args) {
+    var backData = new RepVideoDetail()
+    try {
+        let url = args.id // 传入的是详情页链接
+        // 这里需要请求详情页获取播放链接（或者直接用接口解析）
+        // 为了简化，这里我们尝试直接解析播放源，或者返回一个提示
+
+        // 模拟详情数据
+        backData.vod_name = "豆瓣电影详情"
+        backData.vod_play_url = "播放测试$https://example.com/test.mp4" // 这里需要真实的解析逻辑
+        backData.vod_play_from = "测试源"
+
+    } catch (error) {
+        backData.error = error.toString()
+    }
+    return JSON.stringify(backData)
+}
+
+/**
+ * 搜索视频
+ */
+async function searchVideo(args) {
+    var backData = new RepVideoList()
+    try {
+        let keyword = args.searchWord
+        let page = args.page || 1
+        let start = (page - 1) * 20
+
+        let url = `https://movie.douban.com/j/search_subjects?type=movie&tag=%E7%83%AD%E6%98%A0&sort=recommend&page_limit=20&page_start=${start}`
+        // 豆瓣搜索接口较复杂，这里简单复用列表逻辑或提示
+        backData.error = "暂不支持直接搜索，请通过分类浏览"
+
+    } catch (error) {
+        backData.error = error.toString()
+    }
+    return JSON.stringify(backData)
+}
+
+// 以下函数如果不使用，保持空实现即可
+async function getSubclassList(args) {
+    var backData = new RepVideoSubclassList()
+    return JSON.stringify(backData)
+}
+
+async function getSubclassVideoList(args) {
+    var backData = new RepVideoList()
+    return JSON.stringify(backData)
+}
+
+async function getVideoPlayUrl(args) {
+    var backData = new RepVideoPlayUrl()
+    // 这里处理真实的播放地址解析
+    backData.playUrl = args.playUrl
+    return JSON.stringify(backData)
+}
+
+// ignore
