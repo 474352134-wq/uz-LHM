@@ -1,5 +1,5 @@
 //@name:{LHM}豆瓣_TMDB
-//@version:16
+//@version:17
 //@webSite:https://www.themoviedb.org/
 //@remark:已切换为 TMDB 数据源，使用 API Key: 0c9ff73a2d99c4ece5f0134e2586c375
 //@order:A01
