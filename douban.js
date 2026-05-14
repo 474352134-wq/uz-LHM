@@ -1,74 +1,71 @@
 // ignore
-
-//@name:豆瓣电影热映-最终修复版
+//@name:豆瓣影视
 //@webSite:https://movie.douban.com
-//@version:3.0
-//@remark:使用完全公开的JSONP接口，无需任何验证
-//@codeID:
-
+//@version:24
+//@remark:豆瓣电影剧集搜索 高分推荐
+//@isAV:0
+//@deprecated:0
 // ignore
 
-/**
- * 核心配置
- */
-// 使用豆瓣电影分类接口，完全公开无需验证
-var BASE_URL = 'https://movie.douban.com/j/new_search_subjects?sort=U&range=0,10&tags=&start=';
+const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 
-/**
- * 入口函数
- */
-function getVideoList(args) {
-    var page = args.page || 1;
-    var count = 20;
-    var start = (page - 1) * count;
-
-    var url = BASE_URL + start + '&count=' + count;
-
-    try {
-        // 构造请求头，伪装成普通浏览器
-        var headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Referer": "https://movie.douban.com/",
-            "Accept": "application/json"
-        };
-
-        // 发起同步请求
-        var response = http.get(url, headers);
-        
-        if (response && response.statusCode == 200) {
-            var json = JSON.parse(response.body);
-            
-            // 检查是否有数据
-            if (json.data && json.data.length > 0) {
-                var videos = [];
-                
-                for (var i = 0; i < json.data.length; i++) {
-                    var item = json.data[i];
-                    
-                    // 构建视频对象
-                    var video = {
-                        title: item.title,
-                        url: item.url, // 详情页链接
-                        cover: item.cover, // 封面图
-                        desc: "评分: " + item.rate + " / " + item.year, // 评分和年份
-                        type: 1 // 类型1表示跳转到网页
-                    };
-                    
-                    videos.push(video);
-                }
-                
-                return videos;
-            } else {
-                // 没有更多数据
-                return [];
-            }
-        } else {
-            // 请求失败
-            console.error("请求失败: " + (response ? response.statusCode : "无响应"));
-            return [];
+// 首页分类/推荐
+async function home() {
+    let list = [];
+    // 豆瓣高分电影
+    let res = await fetch(`https://movie.douban.com/j/search_subject?type=movie&tag=豆瓣高分&page_limit=20`, {
+        headers: {
+            "User-Agent": UA,
+            "Referer": "https://movie.douban.com/"
         }
-    } catch (e) {
-        console.error("解析失败: " + e.message);
-        return [];
-    }
+    });
+    let json = await res.json();
+    json.subjects.forEach(item => {
+        list.push({
+            vod_id: item.id,
+            vod_name: item.title,
+            vod_pic: item.cover.url,
+            vod_year: item.year,
+            vod_score: item.rating.value
+        });
+    });
+    return { list: list };
+}
+
+// 搜索
+async function search(kw, page) {
+    let list = [];
+    let res = await fetch(`https://movie.douban.com/j/search_subject?q=${encodeURIComponent(kw)}&type=all&page_limit=20&page_start=${(page-1)*20}`, {
+        headers: {
+            "User-Agent": UA,
+            "Referer": "https://movie.douban.com/"
+        }
+    });
+    let json = await res.json();
+    json.subjects.forEach(item => {
+        list.push({
+            vod_id: item.id,
+            vod_name: item.title,
+            vod_pic: item.cover?.url || "",
+            vod_year: item.year || "",
+            vod_score: item.rating?.value || ""
+        });
+    });
+    return { list: list };
+}
+
+// 详情页
+async function detail(id) {
+    // 豆瓣无官方播放源，只返回信息，可后续对接解析
+    return {
+        vod_id: id,
+        vod_name: "豆瓣影片",
+        vod_play_from: ["豆瓣聚合"],
+        vod_play_url: ["暂无播放源$"]
+    };
+}
+
+// 播放解析（预留，可对接第三方解析接口）
+async function play(url) {
+    return { url: "" };
 }
