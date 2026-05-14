@@ -1,5 +1,5 @@
 //@name:{LHM}TMDB安全版
-//@version:1
+//@version:7
 //@webSite:https://www.themoviedb.org/
 //@remark:最终安全尝试
 //@order:A01
