@@ -1,7 +1,7 @@
-//@name:TMDB视频源
+//@name:{LHM}TMDB视频源
 //@version:1
 //@webSite:https://www.themoviedb.org/
-//@remark:支持电影、电视剧、综艺、动漫、纪录片，年份筛选至2026年
+//@remark:使用TMDB API获取电影、电视剧、综艺、动漫、纪录片，年份筛选已覆盖至2026年
 //@order:A01
 //@codeID:
 //@env:
@@ -9,14 +9,14 @@
 //@deprecated:0
 
 /* -------------------------------------------------
-   全局配置
+   全局 TMDB 配置（请替换为你的API密钥）
    ------------------------------------------------- */
 var TMDB_API_KEY = '0c9ff73a2d99c4ece5f0134e2586c375';
 var TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 var TMDB_API_BASE = 'https://api.themoviedb.org/3';
 
 /* -------------------------------------------------
-   辅助函数：生成年份列表（2026 - 1990）
+   辅助：生成年份下拉列表（已覆盖到 2026 年）
    ------------------------------------------------- */
 function makeYearList(start, end) {
   var years = [{ name: '全部', id: '' }];
@@ -27,7 +27,7 @@ function makeYearList(start, end) {
 }
 
 /* -------------------------------------------------
-   1️⃣ 主分类列表
+   1️⃣ 主分类列表（电影、电视剧、综艺、动漫、纪录片）
    ------------------------------------------------- */
 async function getClassList(args) {
   var backData = new RepVideoClassList();
@@ -47,7 +47,7 @@ async function getClassList(args) {
 }
 
 /* -------------------------------------------------
-   2️⃣ 二级分类列表（年份 + 排序）
+   2️⃣ 二级过滤器（年份 + 排序）
    ------------------------------------------------- */
 async function getSubclassList(args) {
   var backData = new RepVideoSubclassList();
@@ -73,7 +73,7 @@ async function getSubclassList(args) {
 }
 
 /* -------------------------------------------------
-   3️⃣ 视频列表（核心）
+   3️⃣ 列表页面（TMDB discover 接口，支持年份筛选）
    ------------------------------------------------- */
 async function getVideoList(args) {
   var backData = new RepVideoList();
@@ -86,7 +86,6 @@ async function getVideoList(args) {
     var apiUrl = '';
     var isTV = false;
 
-    // 根据分类构建不同的TMDB API请求
     switch (type) {
       case 'movie':
         apiUrl = TMDB_API_BASE + '/discover/movie?api_key=' + TMDB_API_KEY +
@@ -100,6 +99,7 @@ async function getVideoList(args) {
                  '&page=' + page + '&include_adult=false';
         break;
       case 'variety':
+        isTV = true;  // 综艺在 TMDB 里当作 TV 节目处理
         apiUrl = TMDB_API_BASE + '/discover/tv?api_key=' + TMDB_API_KEY +
                  '&language=zh-CN&sort_by=' + encodeURIComponent(sort) +
                  '&page=' + page + '&with_genres=10764'; // Talk Show
@@ -107,36 +107,47 @@ async function getVideoList(args) {
       case 'anime':
         apiUrl = TMDB_API_BASE + '/discover/movie?api_key=' + TMDB_API_KEY +
                  '&language=zh-CN&sort_by=' + encodeURIComponent(sort) +
-                 '&page=' + page + '&with_genres=16'; // 动画
+                 '&page=' + page + '&with_genres=16';    // 动画
         break;
       case 'documentary':
         apiUrl = TMDB_API_BASE + '/discover/movie?api_key=' + TMDB_API_KEY +
                  '&language=zh-CN&sort_by=' + encodeURIComponent(sort) +
-                 '&page=' + page + '&with_genres=99'; // 纪录片
+                 '&page=' + page + '&with_genres=99';    // 纪录片
         break;
       default:
         apiUrl = TMDB_API_BASE + '/movie/popular?api_key=' + TMDB_API_KEY +
                  '&language=zh-CN&page=' + page;
     }
 
+    // 添加年份过滤（电影用上映年份，电视剧用首播年份）
     if (year) {
-      apiUrl += isTV ? '&first_air_date_year=' + year : '&primary_release_year=' + year;
+      if (isTV) {
+        apiUrl += '&first_air_date_year=' + year;
+      } else {
+        apiUrl += '&primary_release_year=' + year;
+      }
     }
 
     var resp = await req(apiUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
     });
 
     var json = JSONbig.parse(resp.data || '{}');
     var results = json.results || [];
-    var list = results.map(function(item) {
+    var list = [];
+
+    for (var i = 0; i < results.length; i++) {
+      var item = results[i];
       var vd = new VideoDetail();
       vd.vod_id = (isTV ? 'tv_' : 'movie_') + item.id;
       vd.vod_name = item.title || item.name || '';
       vd.vod_pic = item.poster_path ? (TMDB_IMAGE_BASE + item.poster_path) : '';
       vd.vod_remarks = '评分 ' + (item.vote_average ? item.vote_average.toFixed(1) : 'N/A');
-      return vd;
-    });
+      list.push(vd);
+    }
 
     backData.data = list;
     toast('TMDB 返回 ' + list.length + ' 条数据', 2);
@@ -148,7 +159,7 @@ async function getVideoList(args) {
 }
 
 /* -------------------------------------------------
-   4️⃣ 视频详情
+   4️⃣ 详情页（TMDB 电影/电视详情）
    ------------------------------------------------- */
 async function getVideoDetail(args) {
   var backData = new RepVideoDetail();
@@ -157,7 +168,7 @@ async function getVideoDetail(args) {
     if (!vodId) throw new Error('缺少 vod_id');
 
     var parts = vodId.split('_');
-    var mediaType = parts[0];
+    var mediaType = parts[0]; // movie 或 tv
     var tmdbId = parts[1];
 
     var detailUrl = '';
@@ -168,7 +179,10 @@ async function getVideoDetail(args) {
     }
 
     var resp = await req(detailUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
     });
 
     var info = JSONbig.parse(resp.data || '{}');
@@ -178,11 +192,14 @@ async function getVideoDetail(args) {
     detail.vod_pic = info.poster_path ? (TMDB_IMAGE_BASE + info.poster_path) : '';
     detail.vod_remarks = '评分 ' + (info.vote_average ? info.vote_average.toFixed(1) : 'N/A');
     detail.vod_content = info.overview || '暂无简介';
+
+    // 提取年份
     if (info.release_date) {
       detail.vod_year = info.release_date.substring(0, 4);
     } else if (info.first_air_date) {
       detail.vod_year = info.first_air_date.substring(0, 4);
     }
+
     backData.data = detail;
     toast('详情: ' + detail.vod_name, 2);
   } catch (e) {
@@ -193,7 +210,7 @@ async function getVideoDetail(args) {
 }
 
 /* -------------------------------------------------
-   5️⃣ 播放地址（留空）
+   5️⃣ 播放地址（TMDB 不提供播放链接，留空）
    ------------------------------------------------- */
 async function getVideoPlayUrl(args) {
   var backData = new RepVideoPlayUrl();
@@ -202,7 +219,7 @@ async function getVideoPlayUrl(args) {
 }
 
 /* -------------------------------------------------
-   6️⃣ 搜索功能
+   6️⃣ 搜索（TMDB multi 搜索，自动识别电影/电视）
    ------------------------------------------------- */
 async function searchVideo(args) {
   var backData = new RepVideoList();
@@ -213,7 +230,10 @@ async function searchVideo(args) {
     var url = TMDB_API_BASE + '/search/multi?api_key=' + TMDB_API_KEY +
               '&language=zh-CN&query=' + encodeURIComponent(kw) + '&page=1';
     var resp = await req(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
     });
 
     var json = JSONbig.parse(resp.data || '{}');
