@@ -1,9 +1,9 @@
 // ignore
 
-//@name:豆瓣电影修复版
+//@name:豆瓣电影修复版(带Cookie)
 //@webSite:https://movie.douban.com
-//@version:3
-//@remark:修复了无数据问题，增加了防拦截请求头
+//@version:4
+//@remark:必须填入Cookie才能显示数据
 //@isAV:0
 //@deprecated:0
 
@@ -37,245 +37,144 @@ const appConfig = {
     _uzTag: '',
     get uzTag() { return this._uzTag },
     set uzTag(value) { this._uzTag = value },
+    // 👇 把截图里的 Cookie 内容粘贴在这里，替换掉原来的空字符串
+    _cookie: 'll="118297"; bid=boJYIZel7VY; _vwo_uuid_v2=D9DB9358E8164A07A59578831654B7800|4b559143faa8f5a04a9dab4dc74cda1e; dbcl2="295088353:j8wOlKpy4Kw"; push_noty_num=0; push_doumail_num=0; ck=jx66; ap_v=0,6.0; frodotk_db="a9ffbd125fb0de6bfdff37371f129b41"; __utmc=30149280; __utmz=30149280.1779154707.6.4.utmcsr=cn.bing.com|utmccn=(referral)|utmcmd=referral|utmcct=/; __utmv=30149280.29508; __utma=30149280.827381539.1772196852.1779154707.1779157261.7; __utmb=30149280.0.10.1779157261',
 }
 
-// 通用请求头，伪装成浏览器，防止被豆瓣屏蔽
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://www.google.com/',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    // 注意：Cookie 有时会过期，但带上基础的可以防一部分拦截
-    'Cookie': 'll="118281"; bid=Fb3x...;' 
-}
-
-/**
- * 1. 获取分类列表 (首页显示的菜单)
- */
-async function getClassList(args) {
-    var backData = new RepVideoClassList()
-    try {
-        // 手动定义分类，因为豆瓣没有标准的API，硬编码最稳定
-        let classes = [
-            { type_id: 'nowplaying', type_name: '🔥 正在热映' },
-            { type_id: 'soon', type_name: '📅 即将上映' },
-            { type_id: 'top250', type_name: '🏆 豆瓣 Top250' },
-            { type_id: 'weekly', type_name: '📈 一周口碑榜' }
+async function getClassList(args: UZArgs): Promise<RepVideoClassList> {
+    return {
+        classList: [
+            { type_id: "1", type_name: "🔥 豆瓣热映" },
+            { type_id: "2", type_name: "🎬 即将上映" },
+            { type_id: "3", type_name: "🏆 豆瓣Top250" },
         ]
-        backData.class = classes
-    } catch (e) {
-        backData.error = '分类获取失败: ' + e.message
-        toast('豆瓣源错误: ' + e.message) // 在APP上弹出提示
     }
-    return JSON.stringify(backData)
 }
 
-/**
- * 2. 获取视频列表 (点击分类后显示的电影)
- */
-async function getVideoList(args) {
-    var backData = new RepVideoList()
-    // args.classifyId 对应上面定义的 type_id
-    // args.page 当前页码
-    let typeId = args.classifyId
-    let page = args.page || 1
-    let url = ''
+async function getVideoList(args: UZSubclassVideoListArgs): Promise<RepVideoList> {
+    const { type_id, page } = args;
+    let url = '';
+
+    if (type_id === "1") {
+        url = `https://movie.douban.com/j/search_subjects?type=movie&tag=%E7%83%AD%E6%98%A0&sort=rank&page_limit=20&page_start=${(page - 1) * 20}`;
+    } else if (type_id === "2") {
+        url = `https://movie.douban.com/j/search_subjects?type=movie&tag=%E5%8D%B3%E5%B0%86%E4%B8%8A%E6%98%A0&sort=rank&page_limit=20&page_start=${(page - 1) * 20}`;
+    } else if (type_id === "3") {
+        url = `https://movie.douban.com/j/search_subjects?type=movie&tag=%E8%B1%86%E7%93%A3%E9%AB%98%E5%88%86&sort=rank&page_limit=20&page_start=${(page - 1) * 20}`;
+    }
 
     try {
-        // 根据分类ID拼接豆瓣URL
-        if (typeId === 'nowplaying') {
-            url = 'https://movie.douban.com/cinema/nowplaying/'
-        } else if (typeId === 'soon') {
-            url = 'https://movie.douban.com/cinema/later/'
-        } else if (typeId === 'top250') {
-            url = 'https://movie.douban.com/top250?start=' + ((page - 1) * 25)
-        } else if (typeId === 'weekly') {
-            url = 'https://movie.douban.com/chart'
-        } else {
-            backData.error = '未知分类'
-            return JSON.stringify(backData)
-        }
-
-        // 发起请求，必须带 Headers
-        let res = await req({
+        const response = await req({
             url: url,
-            method: 'GET',
-            headers: HEADERS,
-            responseType: ReqResponseType.TEXT
-        })
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://movie.douban.com/',
+                'Origin': 'https://movie.douban.com',
+                'Cookie': appConfig._cookie, // 使用我们填入的 Cookie
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+            },
+            responseType: ReqResponseType.JSON
+        });
 
-        if (!res || !res.body) {
-            throw new Error('网络请求为空，可能被豆瓣拦截')
+        const data = response.json;
+        if (!data || !data.subjects) {
+            toast(`分类 ${type_id} 数据为空`);
+            return { videoList: [] };
         }
 
-        const $ = cheerio.load(res.body)
-        let videos = []
+        const list = data.subjects.map(item => ({
+            vod_id: item.url,
+            vod_name: item.title,
+            vod_pic: item.cover,
+            vod_remarks: `评分: ${item.rate}`,
+            vod_content: item.title,
+        }));
 
-        // --- 解析逻辑：正在热映/即将上映 ---
-        if (typeId === 'nowplaying' || typeId === 'soon') {
-            // 热映和即将上映的列表结构类似，都在 .lists 里的 li
-            $('#nowplaying .lists li, #showing-soon .lists li').each((i, el) => {
-                let title = $(el).attr('data-title') || $(el).find('.title').text().trim()
-                let cover = $(el).find('img').attr('src')
-                // 清洗封面链接，去掉 ?x=xxx 后缀
-                if (cover && cover.includes('?')) cover = cover.split('?')[0]
-                let url = $(el).find('a').attr('href')
+        return { videoList: list };
 
-                if (title && url) {
-                    videos.push({
-                        vod_name: title,
-                        vod_pic: cover || '',
-                        vod_remarks: $(el).find('.subject-rate').text() || '热映中',
-                        vod_url: url // 传递详情页链接
-                    })
-                }
-            })
-        }
-        
-        // --- 解析逻辑：Top250 ---
-        else if (typeId === 'top250') {
-            $('#content .grid_view li').each((i, el) => {
-                let title = $(el).find('.title').text().trim()
-                let cover = $(el).find('img').attr('src')
-                let url = $(el).find('a').attr('href')
-                let score = $(el).find('.rating_num').text().trim()
-
-                if (title && url) {
-                    videos.push({
-                        vod_name: title,
-                        vod_pic: cover,
-                        vod_remarks: '评分: ' + score,
-                        vod_url: url
-                    })
-                }
-            })
-        }
-
-        // --- 解析逻辑：一周口碑榜 ---
-        else if (typeId === 'weekly') {
-             $('.indent table tr').each((i, el) => {
-                // 第一行通常是表头，跳过
-                if(i === 0) return; 
-                let title = $(el).find('.pl2 a').text().replace(/\n/g, '').trim()
-                let cover = $(el).find('img').attr('src')
-                let url = $(el).find('.pl2 a').attr('href')
-                let desc = $(el).find('.pl').text() // 简介
-
-                if (title && url) {
-                    videos.push({
-                        vod_name: title,
-                        vod_pic: cover,
-                        vod_remarks: desc,
-                        vod_url: url
-                    })
-                }
-            })
-        }
-
-        backData.list = videos
-
-    } catch (e) {
-        console.log('豆瓣源错误:', e)
-        backData.error = '加载失败: ' + e.message
-        toast('豆瓣源错误: ' + e.message)
+    } catch (error) {
+        toast(`获取列表失败: ${error.message}`);
+        return { videoList: [] };
     }
-    return JSON.stringify(backData)
 }
 
-/**
- * 3. 获取详情 (核心：提取名字并触发搜索)
- */
-async function getVideoDetail(args) {
-    var backData = new RepVideoDetail()
-    try {
-        // 获取详情页内容
-        let res = await req({
-            url: args.vodId, // args.vodId 就是列表传来的 vod_url
-            method: 'GET',
-            headers: HEADERS,
-            responseType: ReqResponseType.TEXT
-        })
-
-        if (!res || !res.body) throw new Error('详情页获取失败')
-
-        const $ = cheerio.load(res.body)
-        
-        // 提取电影名称：通常在 <span property="v:itemreviewed">
-        let title = $('span[property="v:itemreviewed"]').text().trim()
-        
-        // 提取封面
-        let cover = $('#mainpic img').attr('src')
-        if (cover && cover.includes('?')) cover = cover.split('?')[0]
-
-        // 提取年份
-        let year = $('span[property="v:initialReleaseDate"]').text().trim().split('-')[0]
-
-        if (!title) throw new Error('无法提取电影名')
-
-        // 设置返回数据
-        backData.vod_name = title
-        backData.vod_pic = cover
-        backData.vod_year = year
-        backData.vod_content = $('span[property="v:summary"]').text().replace(/\s+/g, '').substring(0, 200) + '...'
-
-        // 【关键】告诉 UZ 去搜索这个标题
-        // UZ 会自动拿着 vod_name 去所有启用的搜索源里搜索
-        backData.vod_play_url = '点击搜索播放$SEARCH://' + title
-
-    } catch (e) {
-        backData.error = e.message
-        toast('详情错误: ' + e.message)
+async function getVideoDetail(args: UZArgs): Promise<RepVideoDetail> {
+    const url = args.video.vod_id;
+    if (!url) {
+        toast("无效的电影链接");
+        return {};
     }
-    return JSON.stringify(backData)
-}
-
-// 播放地址处理
-async function getVideoPlayUrl(args) {
-    var backData = new RepVideoPlayUrl()
-    // 如果是 SEARCH 协议，直接返回空，UZ 会自动跳转搜索
-    if (args.flag === 'SEARCH') {
-        backData.playUrl = '' 
-    }
-    return JSON.stringify(backData)
-}
-
-// 搜索功能（可选，这里直接复用豆瓣搜索页）
-async function searchVideo(args) {
-    var backData = new RepVideoList()
-    let keyword = args.searchWord
-    let url = `https://movie.douban.com/subject_search?search_text=${encodeURIComponent(keyword)}`
 
     try {
-        let res = await req({
+        const response = await req({
             url: url,
-            headers: HEADERS,
-            responseType: ReqResponseType.TEXT
-        })
-        
-        const $ = cheerio.load(res.body)
-        let videos = []
-
-        // 搜索结果解析（搜索结果页面结构比较复杂，这里抓取主要结果）
-        $('.item-root').each((i, el) => {
-            let title = $(el).find('.title-text').text() || $(el).find('a').attr('title')
-            let cover = $(el).find('img').attr('src')
-            let url = $(el).find('a').attr('href')
-            
-            if(title && url && url.includes('/subject/')) {
-                 videos.push({
-                    vod_name: title,
-                    vod_pic: cover,
-                    vod_remarks: '豆瓣搜索',
-                    vod_url: url
-                })
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://movie.douban.com/',
+                'Cookie': appConfig._cookie,
             }
-        })
-        backData.list = videos
-    } catch (e) {
-        backData.error = e.message
+        });
+
+        const html = response.text;
+        const $ = cheerio.load(html);
+
+        const title = $('span[property="v:itemreviewed"]').text().trim();
+        const cover = $('a.nbgnbg img').attr('src') || '';
+        const desc = $('span[property="v:summary"]').text().trim().replace(/\s+/g, ' ');
+
+        // 触发全局搜索
+        const searchResult = await searchVideo({ keyWord: title });
+
+        return {
+            vod_name: title,
+            vod_pic: cover,
+            vod_content: desc,
+            vod_play_from: '豆瓣搜索',
+            vod_play_url: searchResult.videoList.map(item => `${item.vod_name}$${item.vod_id}`).join('#')
+        };
+
+    } catch (error) {
+        toast(`获取详情失败: ${error.message}`);
+        return {};
     }
-    return JSON.stringify(backData)
 }
 
-// 忽略其他未实现的函数
-async function getSubclassList(args) { return JSON.stringify(new RepVideoSubclassList()) }
-async function getSubclassVideoList(args) { return JSON.stringify(new RepVideoList()) }
+async function searchVideo(args: UZArgs): Promise<RepVideoList> {
+    const keyword = args.keyWord;
+    if (!keyword) return { videoList: [] };
+
+    try {
+        const response = await req({
+            url: `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(keyword)}`,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://movie.douban.com/',
+                'Cookie': appConfig._cookie,
+            },
+            responseType: ReqResponseType.JSON
+        });
+
+        const data = response.json;
+        if (!data) return { videoList: [] };
+
+        const list = data.map(item => ({
+            vod_id: item.url,
+            vod_name: item.label,
+            vod_pic: item.img || '',
+            vod_remarks: item.type,
+        }));
+
+        return { videoList: list };
+
+    } catch (error) {
+        toast(`搜索失败: ${error.message}`);
+        return { videoList: [] };
+    }
+}
+
+export default {
+    getClassList,
+    getVideoList,
+    getVideoDetail,
+    searchVideo,
+}
