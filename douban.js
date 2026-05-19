@@ -1,66 +1,44 @@
-//@name:豆瓣推荐 (腾讯源)
-//@version:15
-//@webSite:https://v.qq.com
-//@remark:严格遵循PPNix规范，返回JSON字符串
-//@order:A01
+// @name 豆瓣推荐
+// @version 16
+// @author 你的ID
+// @description 腾讯视频源，适配UZ
+// @webSite https://v.qq.com
+// @type 101
+// @order 1
 
-// --- 核心逻辑 ---
-async function getHomeContent() {
-    // 1. 获取腾讯视频推荐页数据
-    const url = 'https://v.qq.com/channel/cartoon?listpage=1&channel=cartoon&sort=18&filter_title=';
-    const headers = {
-        "Referer": "https://v.qq.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+// 核心函数：获取首页数据
+function getHomeContent() {
+    // 1. 定义请求头，伪装成浏览器
+    var headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Referer": "https://v.qq.com/"
     };
 
-    try {
-        // 2. 发起网络请求
-        const response = await fetch(url, { headers });
-        const html = await response.text();
+    // 2. 发起 GET 请求
+    // 注意：这里直接用 http.get，这是 UZ 最原生的写法
+    var url = "https://v.qq.com/channel/cartoon?listpage=1&channel=cartoon&sort=18&filter_title=";
+    var html = http.get(url, headers);
 
-        // 3. 解析HTML，提取视频信息 (示例：提取前10个视频)
-        const videos = [];
-        const regex = /<a.*?href="(.*?)".*?title="(.*?)".*?data-float="(.*?)".*?data-cover="(.*?)".*?data-playnum="(.*?)".*?data-score="(.*?)".*?/g;
-        let match;
-        let count = 0;
+    // 3. 解析数据 (这里只是示例，你需要根据实际网页结构调整正则)
+    // 如果你的网页结构变了，这里需要重新写正则表达式
+    var videos = [];
 
-        while ((match = regex.exec(html)) !== null && count < 10) {
-            const videoUrl = match[1];
-            const title = match[2];
-            const playNum = match[5];
-            const score = match[6];
-            const coverUrl = match[4];
-
-            // 4. 构建符合UZ规范的视频对象
+    // 示例：提取视频标题和链接 (你需要根据实际网页结构调整)
+    var regex = /<a.*?href="(.*?)".*?title="(.*?)"/g;
+    var match;
+    while ((match = regex.exec(html)) !== null) {
+        // 防止匹配到无关链接
+        if (match[1].includes("play")) {
             videos.push({
-                title: title,
-                url: videoUrl,
-                cover: coverUrl,
-                desc: `播放量: ${playNum} | 评分: ${score}`,
-                type: 'video' // 明确指定类型
+                "vod_name": match[2], // 视频名
+                "vod_url": match[1],  // 播放链接
+                "vod_pic": "",        // 图片链接 (可选)
+                "vod_remarks": "腾讯源" // 备注 (可选)
             });
-            count++;
         }
-
-        // 5. 返回JSON字符串 (PPNix规则：必须返回字符串)
-        return JSON.stringify({
-            code: 0, // 0表示成功
-            msg: 'success',
-            data: videos
-        });
-
-    } catch (error) {
-        // 6. 错误处理：返回错误信息
-        return JSON.stringify({
-            code: -1,
-            msg: '请求失败: ' + error.message,
-            data: []
-        });
     }
-}
 
-// --- 入口函数 ---
-// UZ脚本规范：必须导出一个函数，该函数返回JSON字符串
-module.exports = async function () {
-    return await getHomeContent();
-};
+    // 4. 返回 JSON 字符串
+    // 这是最关键的一步，必须返回字符串，不能返回对象
+    return JSON.stringify(videos);
+}
