@@ -1,5 +1,5 @@
 //@name:[腾讯] 腾讯视频源
-//@version:22
+//@version:1.0
 //@webSite:https://v.qq.com
 //@remark:适用于UZ影视的腾讯视频源（改自PPnix）
 //@order:A05
@@ -8,11 +8,14 @@
 //@isAV:0
 //@deprecated:0
 
+const OmniBox = require('omnibox_sdk');
 const cheerio = require('cheerio');
 const runner = require('spider_runner');
-runner.run(module.exports);
 
 module.exports = { getClassList, getVideoList, getVideoDetail, getVideoPlayUrl, searchVideo, getSubclassList, getSubclassVideoList };
+
+runner.run(module.exports);
+
 
 const appConfig = {
     _webSite: 'https://v.qq.com',
