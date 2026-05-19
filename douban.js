@@ -1,13 +1,14 @@
-//@name:腾讯视频 (豆瓣推荐源)
+//@name:豆瓣推荐 (腾讯源)
 //@version:14
 //@webSite:https://v.qq.com
-//@remark:修复JS渲染问题，改用频道页API
+//@remark:适配UZ影视规范，抓取腾讯视频数据
 //@order:A01
 //@codeID:
 //@env:
 //@isAV:0
 //@deprecated:0
 
+// --- 核心配置 ---
 const appConfig = {
     _webSite: 'https://v.qq.com',
     get webSite() {
@@ -23,198 +24,168 @@ const appConfig = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         };
     },
-    _uzTag: '',
-    get uzTag() {
-        return this._uzTag;
-    },
-    set uzTag(value) {
-        this._uzTag = value;
-    },
 };
 
-/**
- * 通用列表解析函数
- * 注意：腾讯视频的 /channel/* 页面结构相对固定
- */
-async function parseListHtml(html, backData) {
-    const $ = cheerio.load(html);
-    
-    // 腾讯视频频道页的主要列表容器
-    // 经过分析，视频项通常包裹在 .list_page 或 .mod_content 下
-    $('.mod_content li, .list_item').each((_, elem) => {
-        const video = new VideoDetail();
-        const $elem = $(elem);
-        
-        const $link = $elem.find('a').first();
-        const href = $link.attr('href');
-        if (!href) return;
-
-        // 确保链接是完整的
-        const videoUrl = href.startsWith('http') ? href : appConfig.webSite + href;
-        
-        video.vod_id = videoUrl; // 使用完整URL作为ID
-        video.vod_name = $link.attr('title') || $elem.find('img').attr('alt') || $link.text().trim();
-        
-        // 处理图片懒加载 (data-src) 和相对协议 (//)
-        const imgSrc = $elem.find('img').attr('data-src') || $elem.find('img').attr('src');
-        if (imgSrc) {
-            video.vod_pic = imgSrc.startsWith('//') ? 'https:' + imgSrc : imgSrc;
-        }
-
-        // 提取备注信息 (如更新至xx集, 评分等)
-        video.vod_remarks = $elem.find('.tag_txt, .figure_caption, .score').text().trim();
-        
-        backData.data.push(video);
-    });
-    
-    return backData;
-}
-
-/**
- * 分类列表
- * 修复：映射到腾讯视频实际的频道路径
- */
+// --- 1. 分类列表 (getClassList) ---
 async function getClassList(args) {
-    var backData = new RepVideoClassList();
-    try {
-        backData.data = [
+    var backData = {
+        code: 0,
+        msg: "ok",
+        page: 1,
+        pagecount: 1,
+        limit: 20,
+        total: 4,
+        list: [
             { type_id: 'movie', type_name: '电影', hasSubclass: false },
             { type_id: 'tv', type_name: '电视剧', hasSubclass: false },
             { type_id: 'variety', type_name: '综艺', hasSubclass: false },
             { type_id: 'anime', type_name: '动漫', hasSubclass: false },
-        ];
-    } catch (error) {
-        backData.error = error.toString();
-    }
+        ]
+    };
     return JSON.stringify(backData);
 }
 
-/**
- * 获取视频列表
- * 修复：不再使用 /list/1.html (JS渲染页)，改用 /channel/* (静态HTML页)
- */
+// --- 2. 获取视频列表 (getVideoList) ---
 async function getVideoList(args) {
-    var backData = new RepVideoList();
+    var backData = {
+        code: 0,
+        msg: "ok",
+        page: 1,
+        pagecount: 1,
+        limit: 20,
+        total: 0,
+        list: []
+    };
+
     try {
         const { type_id, page = 1 } = args;
-        
-        // 腾讯视频频道页映射
-        // 电影: /channel/movie/list
-        // 电视剧: /channel/tv/list  
-        // 综艺: /channel/variety/list
-        // 动漫: /channel/anime/list
-        const pathMap = { 
-            'movie': '/channel/movie/list',
-            'tv': '/channel/tv/list',
-            'variety': '/channel/variety/list',
-            'anime': '/channel/anime/list' 
-        };
-        
-        const path = pathMap[type_id] || pathMap['movie'];
-        // 注意：腾讯频道页的分页参数通常是 ?page=2
-        const url = `${appConfig.webSite}${path}?page=${page}`;
+
+        // 腾讯视频频道页 URL 映射
+        const typeIdMap = { 'movie': 'channel/movie', 'tv': 'channel/tv', 'variety': 'channel/variety', 'anime': 'channel/cartoon' };
+        const path = typeIdMap[type_id] || 'channel/movie';
+        const url = `${appConfig.webSite}/x/bu/pagesheet/list?_all=1&append=1&channel=${path}&listpage=1&offset=${(page - 1) * 30}&pagesize=30`;
 
         const response = await req(url, { headers: appConfig.headers() });
-        
-        // 检查是否获取到有效HTML
-        if (response.data.includes('请启用JavaScript')) {
-            backData.error = "获取数据失败：腾讯视频页面需要JS渲染，当前源可能已失效";
-            return JSON.stringify(backData);
+        const json = JSON.parse(response.data);
+
+        if (json.data && json.data.item_list) {
+            json.data.item_list.forEach(item => {
+                const video = {
+                    vod_id: item.id || item.cover, // 使用 ID 或图片链接作为唯一标识
+                    vod_name: item.title || item.name,
+                    vod_pic: item.cover || item.pic,
+                    vod_remarks: item.description || item.update_info || ''
+                };
+                backData.list.push(video);
+            });
+            backData.total = json.data.total || 0;
         }
 
-        backData = await parseListHtml(response.data, backData);
-        
     } catch (error) {
-        backData.error = error.toString();
+        backData.code = 1;
+        backData.msg = error.toString();
     }
     return JSON.stringify(backData);
 }
 
-/**
- * 搜索视频
- * 修复：使用腾讯搜索的静态结果页
- */
+// --- 3. 搜索视频 (searchVideo) ---
 async function searchVideo(args) {
-    var backData = new RepVideoList();
+    var backData = {
+        code: 0,
+        msg: "ok",
+        page: 1,
+        pagecount: 1,
+        limit: 20,
+        total: 0,
+        list: []
+    };
+
     try {
         const { searchWord, page = 1 } = args;
         const encoded = encodeURIComponent(searchWord);
-        // 腾讯搜索页结构
-        const url = `${appConfig.webSite}/search.html?query=${encoded}&page=${page}`;
+        const url = `${appConfig.webSite}/x/search/?q=${encoded}&page_type=video&offset=${(page - 1) * 30}&pagesize=30`;
 
         const response = await req(url, { headers: appConfig.headers() });
-        backData = await parseListHtml(response.data, backData);
-        
+        const json = JSON.parse(response.data);
+
+        if (json.data && json.data.item_list) {
+            json.data.item_list.forEach(item => {
+                const video = {
+                    vod_id: item.id,
+                    vod_name: item.title,
+                    vod_pic: item.cover,
+                    vod_remarks: item.description || ''
+                };
+                backData.list.push(video);
+            });
+            backData.total = json.data.total || 0;
+        }
+
     } catch (error) {
-        backData.error = error.toString();
+        backData.code = 1;
+        backData.msg = error.toString();
     }
     return JSON.stringify(backData);
 }
 
-/**
- * 获取视频详情
- * 优化：增强选择器的容错性
- */
+// --- 4. 视频详情 (getVideoDetail) ---
 async function getVideoDetail(args) {
-    var backData = new RepVideoDetail();
+    var backData = {
+        code: 0,
+        msg: "ok",
+        data: {}
+    };
+
     try {
         const url = args.url.startsWith('http') ? args.url : appConfig.webSite + args.url;
         const response = await req(url, { headers: appConfig.headers(url) });
-        const $ = cheerio.load(response.data);
 
-        const video = new VideoDetail();
-        video.vod_id = args.url;
-        
-        // 尝试多种选择器获取标题
-        video.vod_name = $('h1').text().trim() || $('.video-title').text().trim() || $('.mod-title em').text().trim();
-        
-        // 尝试获取首张图片作为海报
-        const firstImg = $('img').first().attr('src');
-        if (firstImg && !firstImg.includes('placeholder')) {
-            video.vod_pic = firstImg.startsWith('//') ? 'https:' + firstImg : firstImg;
-        }
+        // 尝试从网页源码中提取信息 (简单正则)
+        const html = response.data;
+        const titleMatch = html.match(/<title>(.*?)<\/title>/);
+        const descMatch = html.match(/name="description" content="(.*?)"/);
 
-        // 提取简介
-        video.vod_content = $('.desc').text().trim() || $('.video-desc').text().trim() || $('.mod-intro').text().trim();
-
-        // 演员/导演 (腾讯结构复杂，这里使用通用选择器)
-        // 通常在 .mod-basic-info 或 .actor-list 下
-        video.vod_actor = $('.actor-list').text().trim() || $('.mod-basic-info .actor').text().trim();
-        video.vod_director = $('.director-list').text().trim() || $('.mod-basic-info .director').text().trim();
-
-        // 设置播放来源
-        video.vod_play_from = "腾讯视频";
-        // 直接使用网页链接，让APP嗅探
-        video.vod_play_url = `正片$${encodeURIComponent(url)}`;
+        const video = {
+            vod_id: args.url,
+            vod_name: titleMatch ? titleMatch[1].replace(/-.*$/, '') : '',
+            vod_pic: '', // 详情页图片较难提取，留空
+            vod_content: descMatch ? descMatch[1] : '',
+            vod_play_from: "腾讯视频",
+            vod_play_url: `播放$${encodeURIComponent(url)}`
+        };
 
         backData.data = video;
+
     } catch (error) {
-        backData.error = error.toString();
+        backData.code = 1;
+        backData.msg = error.toString();
     }
     return JSON.stringify(backData);
 }
 
-/**
- * 获取播放地址
- * 逻辑：直接返回网页链接，由APP进行视频嗅探
- */
+// --- 5. 获取播放地址 (getVideoPlayUrl) ---
 async function getVideoPlayUrl(args) {
-    var backData = new RepVideoPlayUrl();
+    var backData = {
+        code: 0,
+        msg: "ok",
+        url: "",
+        parse: 0,
+        header: {}
+    };
+
     try {
         const targetUrl = decodeURIComponent(args.url);
-        
         backData.url = targetUrl;
-        backData.headers = appConfig.headers(targetUrl);
-        backData.parse = 0; // 0表示直接请求，不进行JSON解析，让APP嗅探视频流
-        backData.isVideo = true;
-        
+        backData.header = appConfig.headers(targetUrl);
+        backData.parse = 0; // 0 表示直接请求，让 APP 嗅探视频流
     } catch (error) {
-        backData.error = error.toString();
+        backData.code = 1;
+        backData.msg = error.toString();
     }
     return JSON.stringify(backData);
 }
 
-// --- 保持接口完整 ---
-async function getSubclassList(args) { return JSON.stringify(new RepVideoSubclassList()); }
-async function getSubclassVideoList(args) { return JSON.stringify(new RepVideoList()); }
-async function getFyVideoList(args) { return JSON.stringify(new RepVideoList()); }
+// --- 空函数实现 ---
+async function getSubclassList(args) { return JSON.stringify({code: 0, msg: "ok", list: []}); }
+async function getSubclassVideoList(args) { return JSON.stringify({code: 0, msg: "ok", list: []}); }
+async function getFyVideoList(args) { return JSON.stringify({code: 0, msg: "ok", list: []}); }
