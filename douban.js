@@ -1,197 +1,161 @@
 // ignore
-
-//@name:豆瓣电影稳定版
-//@version:8
-//@webSite:https://movie.douban.com
-//@remark:修复语法错误，硬编码分类
+//@name:豆瓣推荐
+//@version:1
+//@webSite:https://v.qq.com
+//@remark:基于OmniBox豆瓣推荐脚本逻辑移植，首页抓取腾讯Banner
 //@isAV:0
 //@deprecated:0
 
-// ignore
-import {
-    VideoClass,
-    RepVideoClassList,
-    RepVideoList,
-    RepVideoDetail,
-    RepVideoPlayUrl,
-    UZArgs,
-    UZSubclassVideoListArgs,
-} from '../core/uzVideo.js'
-
-import {
-    UZUtils,
-    req,
-    ReqResponseType,
-    toast,
-} from '../core/uzUtils.js'
-
-import { cheerio } from '../core/uz3lib.js'
-
-// ==========================================
-// 核心配置 (Cookie 请填入这里)
-// ==========================================
 const appConfig = {
-    _webSite: 'https://movie.douban.com',
-    get webSite() { return this._webSite },
-    set webSite(value) { this._webSite = value },
-    _uzTag: '',
-    get uzTag() { return this._uzTag },
-    set uzTag(value) { this._uzTag = value },
-    // 👇 把你的 Cookie 粘贴在这里，保持单引号
-    _cookie: 'll="118297"; bid=boJYIZel7VY; _vwo_uuid_v2=D9DB9358E8164A07A59578831654B7800|4b559143faa8f5a04a9dab4dc74cda1e; dbcl2="295088353:8wOlKpy4Kw"; push_noty_num=0; push_doumail_num=0; ck=jx66; ap_v=0,6.0; frodotk_db="a9ffbd125fb0de6bfdff37371f129b41"; __utmc=30149280; __utmz=30149280.1779154707.6.4.utmcsr=cn.bing.com|utmccn=(referral)|utmcmd=referral|utmcct=/; __utmv=30149280.29508; __utma=30149280.827381539.1772196852.1779154707.1779157261.7; __utmb=30149280.0.10.1779157261',
+    ver: 1,
+    title: '豆瓣推荐',
+    site: 'v.qq.com',
+};
+
+// 首页：保留原脚本的硬编码分类和筛选器
+async function home() {
+    const classes = [
+        { type_id: "movie", type_name: "选电影" },
+        { type_id: "tv", type_name: "选剧集" },
+        { type_id: "show", type_name: "选综艺" },
+        { type_id: "movie_filter", type_name: "电影筛选" },
+        { type_id: "tv_filter", type_name: "电视剧筛选" },
+        { type_id: "show_filter", type_name: "综艺筛选" },
+    ];
+
+    const filters = {
+        movie: [
+            { key: "category", name: "类型", init: "热门", value: [{ name: "热门", value: "热门" }, { name: "最新", value: "最新" }, { name: "豆瓣高分", value: "豆瓣高分" }, { name: "冷门佳片", value: "冷门佳片" }] },
+            { key: "type", name: "地区", init: "全部", value: [{ name: "全部", value: "全部" }, { name: "华语", value: "华语" }, { name: "欧美", value: "欧美" }, { name: "韩国", value: "韩国" }, { name: "日本", value: "日本" }] },
+        ],
+        tv: [
+            { key: "type", name: "类型", init: "tv", value: [{ name: "综合", value: "tv" }, { name: "国产剧", value: "tv_domestic" }, { name: "欧美剧", value: "tv_american" }, { name: "日剧", value: "tv_japanese" }, { name: "韩剧", value: "tv_korean" }, { name: "动漫", value: "tv_animation" }, { name: "纪录片", value: "tv_documentary" }] },
+        ],
+        show: [
+            { key: "type", name: "类型", init: "show", value: [{ name: "综合", value: "show" }, { name: "国内", value: "show_domestic" }, { name: "国外", value: "show_foreign" }] },
+        ],
+        movie_filter: [
+            { key: "genre", name: "类型", init: "", value: [{ name: "全部", value: "" }, { name: "喜剧", value: "喜剧" }, { name: "爱情", value: "爱情" }, { name: "动作", value: "动作" }, { name: "科幻", value: "科幻" }, { name: "动画", value: "动画" }, { name: "悬疑", value: "悬疑" }, { name: "犯罪", value: "犯罪" }] },
+            { key: "region", name: "地区", init: "", value: [{ name: "全部", value: "" }, { name: "华语", value: "华语" }, { name: "欧美", value: "欧美" }, { name: "韩国", value: "韩国" }, { name: "日本", value: "日本" }] },
+            { key: "year", name: "年代", init: "", value: [{ name: "全部", value: "" }, { name: "2026", value: "2026" }, { name: "2025", value: "2025" }, { name: "2024", value: "2024" }, { name: "2023", value: "2023" }] },
+        ]
+    };
+
+    return JSON.stringify({ class: classes, filters: filters });
 }
 
-// ==========================================
-// 获取分类列表 (硬编码，确保显示)
-// ==========================================
-async function getClassList(args) {
-    let backData = new RepVideoClassList()
-    let classes = []
+// 分类：保留原脚本的核心逻辑，去抓取腾讯视频的Banner轮播图
+async function category(tid, pg, filter, extend) {
+    const page = parseInt(pg) || 1;
+    const videos = [];
 
-    // 手动定义分类，防止网页改版导致抓不到
-    classes.push({ type_id: 'nowplaying', type_name: '热映中', hasSubclass: false })
-    classes.push({ type_id: 'coming_soon', type_name: '即将上映', hasSubclass: false })
-    classes.push({ type_id: 'top250', type_name: 'Top250', hasSubclass: false })
-    classes.push({ type_id: 'weekly', type_name: '口碑榜', hasSubclass: false })
-    classes.push({ type_id: 'movie', type_name: '最新电影', hasSubclass: false })
-    classes.push({ type_id: 'tv', type_name: '最新剧集', hasSubclass: false })
+    // 只有首页（第一页）才去抓取腾讯的Banner数据，完全复刻原脚本逻辑
+    if (page === 1) {
+        try {
+            const tencentBannerUrl = "https://pbaccess.video.qq.com/trpc.vector_layout.page_view.PageService/getPage?video_appid=3000010&vversion_platform=2";
+            
+            const requestData = {
+                page_params: {
+                    page_type: "channel",
+                    page_id: "100113",
+                    scene: "channel",
+                    new_mark_label_enabled: "1",
+                    vl_to_mvl: "",
+                    free_watch_trans_info: "{\"ad_frequency_control_time_list\":{}}",
+                    ad_exp_ids: "100000",
+                    ams_cookies: "lv_play_index=26; o_minduid=CpGFdExDeM8uP-XHCyma_0PzurMADpcf; appuser=83C1297D3AE9DEFF",
+                    ad_trans_data: "{\"game_sessions\":[]}",
+                    skip_privacy_types: "0",
+                    support_click_scan: "1",
+                },
+                page_bypass_params: {
+                    params: {
+                        platform_id: "2",
+                        caller_id: "3000010",
+                        data_mode: "default",
+                        user_mode: "default",
+                        specified_strategy: "",
+                        page_type: "channel",
+                        page_id: "100113",
+                        scene: "channel",
+                        new_mark_label_enabled: "1",
+                    },
+                    scene: "channel",
+                    app_version: "",
+                    abtest_bypass_id: "aa836e91e1411155",
+                },
+                page_context: null,
+            };
 
-    backData.data = classes
-    return JSON.stringify(backData)
-}
+            const res = await req(tencentBannerUrl, {
+                method: "POST",
+                body: JSON.stringify(requestData),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': 'https://v.qq.com/'
+                }
+            });
 
-// ==========================================
-// 获取视频列表 (适配豆瓣最新结构)
-// ==========================================
-async function getVideoList(args) {
-    let backData = new RepVideoList()
-    let videos = []
+            if (res.data && res.data.data && res.data.data.CardList) {
+                for (const cardList of res.data.data.CardList) {
+                    if (cardList.type === "pc_carousel" && cardList.children_list && cardList.children_list.list && cardList.children_list.list.cards) {
+                        const cards = cardList.children_list.list.cards;
+                        for (const card of cards) {
+                            if (card.params && card.params.pic_ori_2880x900) {
+                                let backgroundImage = card.params.pic_ori_2880x900 || card.params.image_url || "";
+                                // UZ影视通常能直接处理https图片，这里保留原逻辑的意图
+                                
+                                let actors = "";
+                                if (card.params.topic_label) {
+                                    const parts = card.params.topic_label.split(" / ");
+                                    actors = parts.length > 1 ? parts.slice(1).join(" / ") : card.params.topic_label;
+                                }
 
-    // 构造请求头，带上 Cookie
-    let headers = {
-        'Cookie': appConfig._cookie,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://movie.douban.com/'
+                                videos.push({
+                                    vod_id: card.params.cid || card.params.play_id || Math.random().toString(36).substring(7),
+                                    vod_name: card.params.title || card.params.title_pc || "",
+                                    vod_pic: backgroundImage,
+                                    vod_remarks: card.params.stitle_pc || card.params.material_video_subtitle || "",
+                                    vod_tag: 'banner', // 标记为Banner，方便前端展示
+                                });
+
+                                if (videos.length >= 5) break;
+                            }
+                        }
+                        if (videos.length >= 5) break;
+                    }
+                }
+            }
+        } catch (e) {
+            console.log("获取Banner数据失败:", e);
+        }
     }
 
-    try {
-        let url = ''
-        // 根据不同的分类 ID 请求不同的接口
-        if (args.url === 'nowplaying') {
-            url = 'https://m.douban.com/rexxar/api/v2/movie/now_playing?start=0&count=20&loc_id=108288&_=0'
-        } else if (args.url === 'coming_soon') {
-            url = 'https://m.douban.com/rexxar/api/v2/movie/coming_soon?start=0&count=20&loc_id=108288&_=0'
-        } else if (args.url === 'top250') {
-            url = `https://m.douban.com/rexxar/api/v2/movie/top250?start=${(args.page-1)*20}&count=20&_=0`
-        } else if (args.url === 'weekly') {
-            url = 'https://m.douban.com/rexxar/api/v2/movie/weekly?start=0&count=20&_=0'
-        } else if (args.url === 'movie') {
-            url = `https://m.douban.com/rexxar/api/v2/subject_collection/movie_latest/items?start=${(args.page-1)*20&count=20&_=0`
-        } else if (args.url === 'tv') {
-            url = `https://m.douban.com/rexxar/api/v2/subject_collection/tv_hot/items?start=${(args.page-1)*20}&count=20&_=0`
-        }
-
-        if (!url) {
-            backData.error = '未知分类'
-            return JSON.stringify(backData)
-        }
-
-        // 发送请求
-        const pro = await req(url, { headers: headers })
-
-        if (pro.error) {
-            backData.error = pro.error
-            return JSON.stringify(backData)
-        }
-
-        // 解析 JSON 数据
-        let jsonData = JSON.parse(pro.data)
-        let items = jsonData.subjects || jsonData.items || []
-
-        items.forEach(item => {
-            let video = new VideoDetail()
-            // 兼容性处理：有的字段叫 id，有的叫 target
-            let id = item.id || (item.target ? item.target.id : '')
-            let title = item.title || (item.target ? item.target.title : '')
-            let cover = item.cover || (item.target ? item.target.cover_url : '')
-            let rate = item.rate || (item.target ? item.target.rating ? item.target.rating.value : '' : '')
-
-            video.vod_id = id.toString()
-            video.vod_name = title
-            video.vod_pic = cover
-            video.vod_remarks = rate ? '评分: ' + rate : ''
-
-            videos.push(video)
-        })
-
-        backData.data = videos
-
-    } catch (e) {
-        backData.error = '解析失败: ' + e.message
-    }
-
-    return JSON.stringify(backData)
+    // 如果不是第一页，或者Banner没抓到，返回空列表或常规搜索（这里为了演示保持原脚本的“首页推荐”特性）
+    return JSON.stringify({ list: videos, page: page, pagecount: 1, limit: 5, total: 5 });
 }
 
-// ==========================================
-// 获取详情页 (简单适配)
-// ==========================================
-async function getVideoDetail(args) {
-    let backData = new RepVideoDetail()
-    try {
-        let url = `https://m.douban.com/rexxar/api/v2/movie/${args.url}`
-        let headers = {
-            'Cookie': appConfig._cookie,
-            'User-Agent': 'Mozilla/5.0',
-            'Referer': 'https://movie.douban.com/'
-        }
-
-        // 这里因为豆瓣详情页需要复杂的解析，且接口通常返回 JSON，
-        // 为了稳定性，我们直接返回一个包含简介的假数据，或者尝试抓取移动版页面
-        let pro = await req(`https://movie.douban.com/subject/${args.url}/`, { headers: headers })
-        if (!pro.error) {
-            const $ = cheerio.load(pro.data)
-            let detail = new VideoDetail()
-            detail.vod_id = args.url
-            detail.vod_name = $('h1 span[property="v:itemreviewed"]').text()
-            detail.vod_pic = $('a.nbgnbg img').attr('src')
-            detail.vod_content = $('span[property="v:summary"]').text().trim()
-            detail.vod_year = $('span[property="v:initialReleaseDate"]').text().substring(0, 4)
-
-            // 构造播放列表 (这里仅作演示，实际豆瓣无直接播放源)
-            let playUrls = []
-            playUrls.push({ url: 'https://movie.douban.com/subject/' + args.url + '/', name: '去豆瓣查看' })
-            detail.vod_play_list = playUrls
-
-            backData.data = detail
-        }
-    } catch (e) {
-        backData.error = e.message
-    }
-    return JSON.stringify(backData)
+// 详情与播放：适配UZ的标准格式
+async function detail(id) {
+    // 这里简单返回一个播放链接，实际可以根据id去腾讯视频抓取真实播放地址
+    const video = {
+        vod_id: id,
+        vod_name: "推荐视频",
+        vod_play_from: "推荐源",
+        vod_play_url: `立即播放$https://v.qq.com/x/cover/${id}.html`
+    };
+    return JSON.stringify({ list: [video] });
 }
 
-// ==========================================
-// 搜索功能
-// ==========================================
-async function searchVideo(args) {
-    let backData = new RepVideoList()
-    // 豆瓣搜索接口较复杂，这里暂用列表接口逻辑复用或提示
-    backData.error = '豆瓣搜索暂不支持，请使用分类浏览'
-    return JSON.stringify(backData)
+async function play(flag, id, flags) {
+    return JSON.stringify({ parse: 1, url: id });
 }
 
-// ==========================================
-// 必须导出的对象 (防止 ReferenceError)
-// ==========================================
-const appObj = {
-    getClassList: getClassList,
-    getVideoList: getVideoList,
-    getVideoDetail: getVideoDetail,
-    searchVideo: searchVideo,
-    getSubclassList: async (args) => JSON.stringify(new RepVideoSubclassList()), // 空实现
-    getSubclassVideoList: async (args) => JSON.stringify(new RepVideoList()), // 空实现
-    getVideoPlayUrl: async (args) => JSON.stringify(new RepVideoPlayUrl()), // 空实现
-}
-
-export default appObj
+export default {
+    appConfig,
+    home,
+    category,
+    detail,
+    play
+};
