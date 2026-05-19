@@ -1,14 +1,13 @@
-//@name:豆瓣推荐 (腾讯源)
+//@name:腾讯视频 (豆瓣推荐源)
 //@version:14
 //@webSite:https://v.qq.com
-//@remark:适配UZ影视规范，抓取腾讯视频数据
+//@remark:修复JS渲染问题，改用频道页API
 //@order:A01
 //@codeID:
 //@env:
 //@isAV:0
 //@deprecated:0
 
-// --- 核心配置 ---
 const appConfig = {
     _webSite: 'https://v.qq.com',
     get webSite() {
@@ -33,40 +32,48 @@ const appConfig = {
     },
 };
 
-// --- 辅助函数：模拟 PPnix 的 HTML 解析逻辑 ---
+/**
+ * 通用列表解析函数
+ * 注意：腾讯视频的 /channel/* 页面结构相对固定
+ */
 async function parseListHtml(html, backData) {
     const $ = cheerio.load(html);
     
-    // 尝试匹配腾讯视频常见的列表结构 (CardList 或 list_item)
-    // 注意：腾讯视频结构复杂，这里使用通用的选择器
-    $('.list_item, .figure, .list-pic').each((_, elem) => {
+    // 腾讯视频频道页的主要列表容器
+    // 经过分析，视频项通常包裹在 .list_page 或 .mod_content 下
+    $('.mod_content li, .list_item').each((_, elem) => {
         const video = new VideoDetail();
         const $elem = $(elem);
         
-        // 尝试获取链接
         const $link = $elem.find('a').first();
         const href = $link.attr('href');
         if (!href) return;
 
-        // 基础信息
-        video.vod_id = href; // 完整链接作为 ID
+        // 确保链接是完整的
+        const videoUrl = href.startsWith('http') ? href : appConfig.webSite + href;
+        
+        video.vod_id = videoUrl; // 使用完整URL作为ID
         video.vod_name = $link.attr('title') || $elem.find('img').attr('alt') || $link.text().trim();
         
-        // 图片
+        // 处理图片懒加载 (data-src) 和相对协议 (//)
         const imgSrc = $elem.find('img').attr('data-src') || $elem.find('img').attr('src');
-        video.vod_pic = imgSrc ? (imgSrc.startsWith('//') ? 'https:' + imgSrc : imgSrc) : '';
+        if (imgSrc) {
+            video.vod_pic = imgSrc.startsWith('//') ? 'https:' + imgSrc : imgSrc;
+        }
 
-        // 备注 (地区/年份/更新集数)
-        video.vod_remarks = $elem.find('.tag_area, .figure_caption, .list-info-desc').text().trim();
-
+        // 提取备注信息 (如更新至xx集, 评分等)
+        video.vod_remarks = $elem.find('.tag_txt, .figure_caption, .score').text().trim();
+        
         backData.data.push(video);
     });
     
     return backData;
 }
 
-// --- 1. 分类列表 (getClassList) ---
-// 对应 PPnix 中的 getClassList
+/**
+ * 分类列表
+ * 修复：映射到腾讯视频实际的频道路径
+ */
 async function getClassList(args) {
     var backData = new RepVideoClassList();
     try {
@@ -82,23 +89,39 @@ async function getClassList(args) {
     return JSON.stringify(backData);
 }
 
-// --- 2. 获取视频列表 (getVideoList) ---
-// 对应 PPnix 中的 getVideoList
+/**
+ * 获取视频列表
+ * 修复：不再使用 /list/1.html (JS渲染页)，改用 /channel/* (静态HTML页)
+ */
 async function getVideoList(args) {
     var backData = new RepVideoList();
     try {
         const { type_id, page = 1 } = args;
         
-        // 构造腾讯视频分类 URL
-        // 电影: https://v.qq.com/list/1.html
-        // 电视剧: https://v.qq.com/list/2.html
-        const typeIdMap = { 'movie': 1, 'tv': 2, 'variety': 3, 'anime': 4 };
-        const tid = typeIdMap[type_id] || 1;
-        const url = `${appConfig.webSite}/list/${tid}.html?page=${page}`;
+        // 腾讯视频频道页映射
+        // 电影: /channel/movie/list
+        // 电视剧: /channel/tv/list  
+        // 综艺: /channel/variety/list
+        // 动漫: /channel/anime/list
+        const pathMap = { 
+            'movie': '/channel/movie/list',
+            'tv': '/channel/tv/list',
+            'variety': '/channel/variety/list',
+            'anime': '/channel/anime/list' 
+        };
+        
+        const path = pathMap[type_id] || pathMap['movie'];
+        // 注意：腾讯频道页的分页参数通常是 ?page=2
+        const url = `${appConfig.webSite}${path}?page=${page}`;
 
         const response = await req(url, { headers: appConfig.headers() });
         
-        // 使用统一的解析函数
+        // 检查是否获取到有效HTML
+        if (response.data.includes('请启用JavaScript')) {
+            backData.error = "获取数据失败：腾讯视频页面需要JS渲染，当前源可能已失效";
+            return JSON.stringify(backData);
+        }
+
         backData = await parseListHtml(response.data, backData);
         
     } catch (error) {
@@ -107,13 +130,16 @@ async function getVideoList(args) {
     return JSON.stringify(backData);
 }
 
-// --- 3. 搜索视频 (searchVideo) ---
-// 对应 PPnix 中的 searchVideo
+/**
+ * 搜索视频
+ * 修复：使用腾讯搜索的静态结果页
+ */
 async function searchVideo(args) {
     var backData = new RepVideoList();
     try {
         const { searchWord, page = 1 } = args;
         const encoded = encodeURIComponent(searchWord);
+        // 腾讯搜索页结构
         const url = `${appConfig.webSite}/search.html?query=${encoded}&page=${page}`;
 
         const response = await req(url, { headers: appConfig.headers() });
@@ -125,9 +151,10 @@ async function searchVideo(args) {
     return JSON.stringify(backData);
 }
 
-// --- 4. 视频详情 (getVideoDetail) ---
-// 对应 PPnix 中的 getVideoDetail
-// 注意：腾讯视频详情页逻辑非常复杂，这里仅做基础信息填充，播放源需依赖嗅探
+/**
+ * 获取视频详情
+ * 优化：增强选择器的容错性
+ */
 async function getVideoDetail(args) {
     var backData = new RepVideoDetail();
     try {
@@ -138,20 +165,27 @@ async function getVideoDetail(args) {
         const video = new VideoDetail();
         video.vod_id = args.url;
         
-        // 基础信息
-        video.vod_name = $('h1').text().trim() || $('.video-title').text().trim();
-        video.vod_pic = $('img').attr('src'); // 简单获取第一张图
+        // 尝试多种选择器获取标题
+        video.vod_name = $('h1').text().trim() || $('.video-title').text().trim() || $('.mod-title em').text().trim();
         
-        // 演员/导演 (腾讯结构复杂，这里使用通用选择器)
-        video.vod_actor = $('.actor-list').text().trim() || $('.mod-actor').text().trim();
-        video.vod_director = $('.director-list').text().trim() || $('.mod-director').text().trim();
-        video.vod_content = $('.desc').text().trim() || $('.video-desc').text().trim();
+        // 尝试获取首张图片作为海报
+        const firstImg = $('img').first().attr('src');
+        if (firstImg && !firstImg.includes('placeholder')) {
+            video.vod_pic = firstImg.startsWith('//') ? 'https:' + firstImg : firstImg;
+        }
 
-        // 腾讯视频通常需要嗅探，这里不尝试解析具体的播放列表
-        // 设置播放来源为 "腾讯视频"
+        // 提取简介
+        video.vod_content = $('.desc').text().trim() || $('.video-desc').text().trim() || $('.mod-intro').text().trim();
+
+        // 演员/导演 (腾讯结构复杂，这里使用通用选择器)
+        // 通常在 .mod-basic-info 或 .actor-list 下
+        video.vod_actor = $('.actor-list').text().trim() || $('.mod-basic-info .actor').text().trim();
+        video.vod_director = $('.director-list').text().trim() || $('.mod-basic-info .director').text().trim();
+
+        // 设置播放来源
         video.vod_play_from = "腾讯视频";
-        // 这里只传 ID，播放时直接打开网页
-        video.vod_play_url = `第1集$${encodeURIComponent(url)}`;
+        // 直接使用网页链接，让APP嗅探
+        video.vod_play_url = `正片$${encodeURIComponent(url)}`;
 
         backData.data = video;
     } catch (error) {
@@ -160,27 +194,27 @@ async function getVideoDetail(args) {
     return JSON.stringify(backData);
 }
 
-// --- 5. 获取播放地址 (getVideoPlayUrl) ---
-// 对应 PPnix 中的 getVideoPlayUrl
-// 对于腾讯视频，我们直接返回网页链接，让 APP 去嗅探 M3U8 或 HLS
+/**
+ * 获取播放地址
+ * 逻辑：直接返回网页链接，由APP进行视频嗅探
+ */
 async function getVideoPlayUrl(args) {
     var backData = new RepVideoPlayUrl();
     try {
-        // args.url 在 getVideoDetail 里被设置为了网页链接
         const targetUrl = decodeURIComponent(args.url);
         
-        backData.url = targetUrl; // 直接返回网页地址
+        backData.url = targetUrl;
         backData.headers = appConfig.headers(targetUrl);
-        backData.parse = 0; // 0 表示直接请求，让 APP 嗅探视频流
-        backData.isVideo = true; // 标记为视频链接
+        backData.parse = 0; // 0表示直接请求，不进行JSON解析，让APP嗅探视频流
+        backData.isVideo = true;
+        
     } catch (error) {
         backData.error = error.toString();
     }
     return JSON.stringify(backData);
 }
 
-// --- 6. 空函数实现 (保持接口完整) ---
-// PPnix 脚本规范要求这些函数存在
+// --- 保持接口完整 ---
 async function getSubclassList(args) { return JSON.stringify(new RepVideoSubclassList()); }
 async function getSubclassVideoList(args) { return JSON.stringify(new RepVideoList()); }
 async function getFyVideoList(args) { return JSON.stringify(new RepVideoList()); }
