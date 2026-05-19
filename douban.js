@@ -1,5 +1,5 @@
 //@name:[腾讯] 腾讯视频源
-//@version:24
+//@version:25
 //@webSite:https://v.qq.com
 //@remark:适用于 UZ 影视的腾讯视频源（改自 PPnix）
 //@order:A05
