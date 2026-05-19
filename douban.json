@@ -2,9 +2,9 @@
       "name": "豆瓣",
       "version": 1,
       "remark": "🍃",
-      "webSite": "https://movies.douban.com",
+      "webSite": "https://movie.douban.com",
       "codeID": "",
-      "api": "https://raw.githubusercontent.com/YYDS678/uzVideo-extensions/main/vod/js/Zhi_gdstudio.txt",
+      "api": "https://raw.githubusercontent.com/474352134-wq/uz-LHM/refs/heads/main/douban.js",
       "logo": "",
       "type": 101
     }
